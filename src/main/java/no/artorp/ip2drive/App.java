@@ -155,7 +155,7 @@ public class App {
 		try {
 			long initialTime = System.nanoTime();
 			long nsInSecond = 1000L * 1_000_000L;
-			long cycle_time = 8 * nsInSecond;
+			long cycle_time = 5 * 60 * nsInSecond;
 			SimpleDateFormat sdfMinSec = new SimpleDateFormat("mm:ss");
 			while (!Thread.interrupted()) {
 				try {

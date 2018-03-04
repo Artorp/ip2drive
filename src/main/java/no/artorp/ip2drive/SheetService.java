@@ -82,7 +82,7 @@ public class SheetService {
 	   Credential credential = new AuthorizationCodeInstalledApp(
 			flow, new LocalServerReceiver()).authorize("user");
 	   if (!savedCredentials) {
-		   System.out.println("Credentials saved to " + App.APPLICATION_DIR.getAbsolutePath());
+		   System.out.println("Credentials are in directory " + App.APPLICATION_DIR.getAbsolutePath());
 		   savedCredentials = true;
 	   }
 	   return credential;
