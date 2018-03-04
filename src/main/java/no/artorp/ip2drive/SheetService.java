@@ -12,7 +12,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.sheets.v4.SheetsScopes;
-import com.google.api.services.sheets.v4.model.*;
+// import com.google.api.services.sheets.v4.model.*;
 import com.google.api.services.sheets.v4.Sheets;
 
 import java.io.IOException;
@@ -33,6 +33,8 @@ public class SheetService {
 
 	/** Global instance of the HTTP transport. */
 	private static HttpTransport HTTP_TRANSPORT;
+	
+	private static GoogleClientSecrets clientSecret = null;
 
 	/** Global instance of the scopes required by this quickstart.
 	*
@@ -52,6 +54,13 @@ public class SheetService {
 		}
 	}
 	
+	public static GoogleClientSecrets clientSecretsWithCache(InputStream in) throws IOException {
+		if (clientSecret == null) {
+			clientSecret = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
+		}
+		return clientSecret;
+	}
+	
 	/**
 	* Creates an authorized Credential object.
 	* @return an authorized Credential object.
@@ -59,8 +68,7 @@ public class SheetService {
 	*/
 	public static Credential authorize(InputStream in) throws IOException {
 	   // Load client secrets.
-	   GoogleClientSecrets clientSecrets =
-			GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
+	   GoogleClientSecrets clientSecrets = clientSecretsWithCache(in);
 
 	   // Build flow and trigger user authorization request.
 	   GoogleAuthorizationCodeFlow flow =

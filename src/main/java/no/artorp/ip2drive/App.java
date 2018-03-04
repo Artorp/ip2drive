@@ -11,9 +11,16 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.FileList;
@@ -81,53 +88,98 @@ public class App {
 			System.exit(1);
 		}
 		
-		// Time to edit the spreadsheet
+		// Set up executor
 		
-		// Build a new authorized API client service.
-		Sheets service = null;
-		try (InputStream is = new FileInputStream(clientSecret)) {
-			service = SheetService.getSheetsService(new FileInputStream(clientSecret));
-		} catch (Exception e) {
-			e.printStackTrace();
-			System.exit(1);
-		}
+		final String spreadsheetId = sheetProp.getProperty(SHEET_ID_KEY);
 		
-		String spreadsheetId = sheetProp.getProperty(SHEET_ID_KEY);
-		String range = "A1:A2";
-		ValueRange response = service.spreadsheets().values()
-				.get(spreadsheetId, range)
-				.execute();
-		List<List<Object>> values = response.getValues();
-		if (values == null || values.size() == 0) {
-			System.out.println("No data found!");
-		} else {
-			System.out.println("Found values!");
-			for (List row : values) {
-				// Print all values in column A, which corresponds to index 0
-				System.out.println(row.get(0));
-				Object cell = row.get(0);
-				System.out.println(cell.getClass());
+		Runnable updateSpreadsheet = () -> {
+			// Build a new authorized API client service.
+			Sheets service = null;
+			try (InputStream is = new FileInputStream(clientSecret)) {
+				service = SheetService.getSheetsService(new FileInputStream(clientSecret));
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.err.println("\nAborting current iteration of task\n");
+				return;
 			}
+			
+			try {
+				// get previous values row 2..15, skipping last row (row 16)
+				ValueRange response = service.spreadsheets().values()
+						.get(spreadsheetId, "A2:B15")
+						.setValueRenderOption("FORMATTED_VALUE")
+						.execute();
+				List<List<Object>> vals = response.getValues();
+				if (vals == null || vals.size() == 0) {
+					System.out.println("No data found, aborting current iteration of task.");
+					return;
+				} else {
+					System.out.println("Successfully got previous values, last row was:");
+					List<Object> upperRow = vals.get(0);
+					System.out.printf("\t%s | %s\n", upperRow.get(0), upperRow.get(1));
+				}
+				
+				// Get current IP and date
+				SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+				String date = sdf.format(new Date());
+				String extIp = IpRetriever.externalIp();
+				System.out.println("New time and IP:");
+				System.out.printf("\t%s | %s\n", date, extIp);
+				
+				List<List<Object>> updatedData = new ArrayList<List<Object>>();
+				updatedData.add(Arrays.asList(date, extIp));
+				
+				// add all old values into array
+				updatedData.addAll(vals);
+				
+				// write to spreadsheet
+				ValueRange body = new ValueRange().setValues(updatedData);
+				UpdateValuesResponse result = service
+						.spreadsheets().values()
+						.update(spreadsheetId, "A2:B16", body)
+						.setValueInputOption("USER_ENTERED")
+						.execute();
+				System.out.printf("%d cells updated.\n", result.getUpdatedCells());
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		};
+		
+		updateSpreadsheet.run();
+		
+		
+		/*
+		ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+		
+		Runnable task = () -> {
+			System.out.println("Executing Task At " + System.nanoTime() + " inside " + Thread.currentThread().getName());
+		};
+		
+		System.out.println("Starting service, while inside thread " + Thread.currentThread().getName());
+		scheduledExecutorService.scheduleAtFixedRate(task, 1, 1, TimeUnit.SECONDS);
+		*/
+		/*
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			System.out.println("Shutdownhook running");
+			scheduledExecutorService.shutdown();
+			try {
+				scheduledExecutorService.awaitTermination(1, TimeUnit.SECONDS);
+				Thread.sleep(3000);
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}));
+		*/
+		/*
+		try {
+			Thread.sleep(5000);
+		} catch (InterruptedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		}
+		//scheduledExecutorService.shutdown();
+		*/
 		
-		
-		// let's write some values
-		
-		List<List<Object>> myValues = Arrays.asList(
-				Arrays.asList(
-						// Cell values in first row
-						"first", "second", "third", "fourth"
-						),
-				Arrays.asList(
-						// Cell values in second row
-						"first2", "second2", "third2", "fourth2"
-						)
-				);
-		ValueRange body = new ValueRange().setValues(myValues);
-		UpdateValuesResponse result =
-				service.spreadsheets().values().update(spreadsheetId, "B1:E2", body)
-				.setValueInputOption("RAW")
-				.execute();
-		System.out.printf("%d cells updated.\n", result.getUpdatedCells());
 	}
 }
