@@ -35,6 +35,8 @@ public class SheetService {
 	private static HttpTransport HTTP_TRANSPORT;
 	
 	private static GoogleClientSecrets clientSecret = null;
+	
+	private static boolean savedCredentials = false;
 
 	/** Global instance of the scopes required by this quickstart.
 	*
@@ -79,8 +81,10 @@ public class SheetService {
 			.build();
 	   Credential credential = new AuthorizationCodeInstalledApp(
 			flow, new LocalServerReceiver()).authorize("user");
-	   System.out.println(
-			"Credentials saved to " + App.APPLICATION_DIR.getAbsolutePath());
+	   if (!savedCredentials) {
+		   System.out.println("Credentials saved to " + App.APPLICATION_DIR.getAbsolutePath());
+		   savedCredentials = true;
+	   }
 	   return credential;
 	}
 

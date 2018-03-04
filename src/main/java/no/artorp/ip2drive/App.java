@@ -1,29 +1,25 @@
 package no.artorp.ip2drive;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-import com.google.api.services.drive.Drive;
-import com.google.api.services.drive.model.FileList;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
 import com.google.api.services.sheets.v4.model.ValueRange;
@@ -92,7 +88,7 @@ public class App {
 		
 		final String spreadsheetId = sheetProp.getProperty(SHEET_ID_KEY);
 		
-		Runnable updateSpreadsheet = () -> {
+		Callable<Void> updateSpreadsheet = () -> {
 			// Build a new authorized API client service.
 			Sheets service = null;
 			try (InputStream is = new FileInputStream(clientSecret)) {
@@ -100,7 +96,7 @@ public class App {
 			} catch (Exception e) {
 				e.printStackTrace();
 				System.err.println("\nAborting current iteration of task\n");
-				return;
+				return null;
 			}
 			
 			try {
@@ -112,7 +108,7 @@ public class App {
 				List<List<Object>> vals = response.getValues();
 				if (vals == null || vals.size() == 0) {
 					System.out.println("No data found, aborting current iteration of task.");
-					return;
+					return null;
 				} else {
 					System.out.println("Successfully got previous values, last row was:");
 					List<Object> upperRow = vals.get(0);
@@ -143,43 +139,51 @@ public class App {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
+			return null;
 		};
 		
-		updateSpreadsheet.run();
+		// Run periodically
+		ExecutorService executorService = Executors.newSingleThreadExecutor();
+		System.out.println("Initial run:");
+		Future<Void> myFuture = executorService.submit(updateSpreadsheet);
 		
-		
-		/*
-		ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
-		
-		Runnable task = () -> {
-			System.out.println("Executing Task At " + System.nanoTime() + " inside " + Thread.currentThread().getName());
-		};
-		
-		System.out.println("Starting service, while inside thread " + Thread.currentThread().getName());
-		scheduledExecutorService.scheduleAtFixedRate(task, 1, 1, TimeUnit.SECONDS);
-		*/
-		/*
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-			System.out.println("Shutdownhook running");
-			scheduledExecutorService.shutdown();
-			try {
-				scheduledExecutorService.awaitTermination(1, TimeUnit.SECONDS);
-				Thread.sleep(3000);
-			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+			System.out.println("\nShutting down executor service...");
+			executorService.shutdownNow();
 		}));
-		*/
-		/*
+		
 		try {
-			Thread.sleep(5000);
+			long initialTime = System.nanoTime();
+			long nsInSecond = 1000L * 1_000_000L;
+			long cycle_time = 8 * nsInSecond;
+			SimpleDateFormat sdfMinSec = new SimpleDateFormat("mm:ss");
+			while (!Thread.interrupted()) {
+				try {
+					myFuture.get(45, TimeUnit.SECONDS);
+				} catch (ExecutionException e) {
+					e.printStackTrace();
+				} catch (TimeoutException e) {
+					e.printStackTrace();
+				}
+				String lastTime = "";
+				while (System.nanoTime() - initialTime < cycle_time) {
+					Date remainingTime = new Date((initialTime - System.nanoTime() + cycle_time) / 1_000_000);
+					String currentTime = sdfMinSec.format(remainingTime);
+					if (!currentTime.equals(lastTime)) {
+						System.out.print("Next update in: " + currentTime + "\r");
+						lastTime = currentTime;
+					}
+					Thread.sleep(100);
+				}
+				initialTime = System.nanoTime();
+				System.out.println();
+				System.out.println("Updating spreadsheet.");
+				myFuture = executorService.submit(updateSpreadsheet);
+			}
 		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
+			executorService.shutdownNow();
 		}
-		//scheduledExecutorService.shutdown();
-		*/
 		
 	}
 }
