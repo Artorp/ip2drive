@@ -31,12 +31,23 @@
 			<version>v4-rev506-1.23.0</version>
 		</dependency>
 
+		<dependency>
+			<groupId>commons-cli</groupId>
+			<artifactId>commons-cli</artifactId>
+			<version>1.4</version>
+		</dependency>
 
 	</dependencies>
 	
 	
 	
 	<build>
+		<resources>
+			<resource>
+				<directory>src/main/resourcefiltered</directory>
+				<filtering>true</filtering>
+			</resource>
+		</resources>
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

@@ -6,23 +6,15 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
-import com.google.api.services.sheets.v4.Sheets;
-import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
-import com.google.api.services.sheets.v4.model.ValueRange;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 
 public class App {
 	
@@ -33,6 +25,51 @@ public class App {
 	
 	
 	public static void main(String[] args) throws IOException {
+		
+		// Parse arguments
+		CommandLineParser parser = new DefaultParser();
+		
+		Options options = new Options();
+		
+		options.addOption("h", "help", false, "print this message");
+		options.addOption("v", "version", false, "print the version information and exit");
+		options.addOption("s", "single", false, "fetch ip, update drive, then exit");
+		options.addOption("c", "continual", false, "fetch ip and update drive every 5 minutes, while writing to sysout");
+		
+		if (args.length == 0) {
+			printUsageThenExit(options);
+		}
+		
+		try {
+			CommandLine cmd = parser.parse(options, args);
+			if (cmd.hasOption("h")) {
+				printUsageThenExit(options);
+			} else if (cmd.hasOption("v")) {
+				System.out.println("ip2drive " + Version.getVersion());
+				System.exit(0);
+			} else if (cmd.hasOption("s")) {
+				Callable<Void> updateSpreadsheet = getSpreadsheetUpdater();
+				runSingle(updateSpreadsheet);
+			} else if (cmd.hasOption("c")) {
+				Callable<Void> updateSpreadsheet = getSpreadsheetUpdater();
+				runPeriodically(updateSpreadsheet);
+			}
+		} catch (ParseException e) {
+			System.out.println(e.getMessage());
+			printUsageThenExit(options);
+		}
+		
+	}
+	
+	private static void printUsageThenExit(Options options) {
+		HelpFormatter formatter = new HelpFormatter();
+		String footer = "Example:\n    ip2drive -h";
+		formatter.printHelp("ip2drive [OPTIONS]", null, options, footer);
+		System.exit(1);
+		return;
+	}
+	
+	private static Callable<Void> getSpreadsheetUpdater() throws IOException {
 		
 		if (!APPLICATION_DIR.exists() || APPLICATION_DIR.isFile()) {
 			APPLICATION_DIR.mkdirs();
@@ -84,106 +121,21 @@ public class App {
 			System.exit(1);
 		}
 		
-		// Set up executor
-		
+		// Set up callable spreadsheet updater
 		final String spreadsheetId = sheetProp.getProperty(SHEET_ID_KEY);
-		
-		Callable<Void> updateSpreadsheet = () -> {
-			// Build a new authorized API client service.
-			Sheets service = null;
-			try (InputStream is = new FileInputStream(clientSecret)) {
-				service = SheetService.getSheetsService(new FileInputStream(clientSecret));
-			} catch (Exception e) {
-				e.printStackTrace();
-				System.err.println("\nAborting current iteration of task\n");
-				return null;
-			}
-			
-			try {
-				// get previous values row 2..15, skipping last row (row 16)
-				ValueRange response = service.spreadsheets().values()
-						.get(spreadsheetId, "A2:B15")
-						.setValueRenderOption("FORMATTED_VALUE")
-						.execute();
-				List<List<Object>> vals = response.getValues();
-				if (vals == null || vals.size() == 0) {
-					System.out.println("No data found, aborting current iteration of task.");
-					return null;
-				} else {
-					System.out.println("Successfully got previous values, last row was:");
-					List<Object> upperRow = vals.get(0);
-					System.out.printf("\t%s | %s\n", upperRow.get(0), upperRow.get(1));
-				}
-				
-				// Get current IP and date
-				SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
-				String date = sdf.format(new Date());
-				String extIp = IpRetriever.externalIp();
-				System.out.println("New time and IP:");
-				System.out.printf("\t%s | %s\n", date, extIp);
-				
-				List<List<Object>> updatedData = new ArrayList<List<Object>>();
-				updatedData.add(Arrays.asList(date, extIp));
-				
-				// add all old values into array
-				updatedData.addAll(vals);
-				
-				// write to spreadsheet
-				ValueRange body = new ValueRange().setValues(updatedData);
-				UpdateValuesResponse result = service
-						.spreadsheets().values()
-						.update(spreadsheetId, "A2:B16", body)
-						.setValueInputOption("USER_ENTERED")
-						.execute();
-				System.out.printf("%d cells updated.\n", result.getUpdatedCells());
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-			return null;
-		};
-		
-		// Run periodically
-		ExecutorService executorService = Executors.newSingleThreadExecutor();
-		System.out.println("Initial run:");
-		Future<Void> myFuture = executorService.submit(updateSpreadsheet);
-		
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-			System.out.println("\nShutting down executor service...");
-			executorService.shutdownNow();
-		}));
-		
+		return new SpreadsheetUpdater(clientSecret, spreadsheetId);
+	}
+	
+	private static void runSingle(Callable<Void> updateSpreadsheet) {
 		try {
-			long initialTime = System.nanoTime();
-			long nsInSecond = 1000L * 1_000_000L;
-			long cycle_time = 5 * 60 * nsInSecond;
-			SimpleDateFormat sdfMinSec = new SimpleDateFormat("mm:ss");
-			while (!Thread.interrupted()) {
-				try {
-					myFuture.get(45, TimeUnit.SECONDS);
-				} catch (ExecutionException e) {
-					e.printStackTrace();
-				} catch (TimeoutException e) {
-					e.printStackTrace();
-				}
-				String lastTime = "";
-				while (System.nanoTime() - initialTime < cycle_time) {
-					Date remainingTime = new Date((initialTime - System.nanoTime() + cycle_time) / 1_000_000);
-					String currentTime = sdfMinSec.format(remainingTime);
-					if (!currentTime.equals(lastTime)) {
-						System.out.print("Next update in: " + currentTime + "\r");
-						lastTime = currentTime;
-					}
-					Thread.sleep(100);
-				}
-				initialTime = System.nanoTime();
-				System.out.println();
-				System.out.println("Updating spreadsheet.");
-				myFuture = executorService.submit(updateSpreadsheet);
-			}
-		} catch (InterruptedException e) {
+			updateSpreadsheet.call();
+		} catch (Exception e) {
 			e.printStackTrace();
-			executorService.shutdownNow();
 		}
-		
+	}
+	
+	private static void runPeriodically(Callable<Void> updateSpreadsheet) {
+		Runnable periodicUpdater = new UpdatePeriodically(5, updateSpreadsheet);
+		new Thread(periodicUpdater).start();
 	}
 }
